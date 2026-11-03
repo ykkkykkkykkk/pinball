@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>핀볼 뽑기</title>
+<title>썩은 핀볼</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
@@ -35,6 +35,9 @@ textarea,input[type=number],select{background:#070919;border:1px solid var(--lin
 textarea{width:100%;min-height:92px;resize:vertical}
 input[type=number]{width:84px}
 select{flex:1;min-width:0}
+.brand{display:flex;align-items:center;gap:10px}
+.capy{width:60px;height:52px;flex:none;filter:drop-shadow(0 0 8px rgba(255,154,31,.45));transform-origin:50% 90%;animation:capy 2.6s ease-in-out infinite}
+@keyframes capy{0%,100%{transform:rotate(-4deg) translateY(0)}50%{transform:rotate(4deg) translateY(-2px)}}
 textarea:focus,input:focus,select:focus,button:focus-visible{outline:2px solid var(--neon);outline-offset:1px}
 .btn{border:0;border-radius:12px;padding:13px 16px;font:900 15px var(--body);color:#06071a;cursor:pointer;transition:transform .08s,filter .15s}
 .btn:active{transform:translateY(1px)}
@@ -91,14 +94,35 @@ input[type=range]{accent-color:var(--neon);flex:1;min-width:80px}
   45%{transform:translateX(-6px)}60%{transform:translateX(5px)}75%{transform:translateX(-3px)}90%{transform:translateX(2px)}}
 #fx{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:50}
 @media (prefers-reduced-motion:reduce){
-  .cabinet.shake,.tense.on,.winner.show .wcard{animation:none}
+  .cabinet.shake,.tense.on,.winner.show .wcard,.capy{animation:none}
 }
 </style>
 </head>
 <body>
 <div class="app">
   <aside class="panel">
-    <h1>핀볼 뽑기</h1>
+    <div class="brand">
+      <svg class="capy" viewBox="0 0 120 104" role="img" aria-label="카피바라">
+        <circle cx="60" cy="13" r="10" fill="#ff9a1f"/>
+        <circle cx="56" cy="10" r="3" fill="#ffc06a"/>
+        <ellipse cx="66" cy="3.5" rx="6" ry="3" fill="#5bd16a" transform="rotate(-20 66 3.5)"/>
+        <ellipse cx="22" cy="31" rx="8" ry="6" fill="#8a5a36"/>
+        <ellipse cx="98" cy="31" rx="8" ry="6" fill="#8a5a36"/>
+        <ellipse cx="22" cy="32" rx="4" ry="3" fill="#6b4428"/>
+        <ellipse cx="98" cy="32" rx="4" ry="3" fill="#6b4428"/>
+        <rect x="9" y="24" width="102" height="76" rx="30" fill="#b07a4f"/>
+        <ellipse cx="60" cy="74" rx="41" ry="25" fill="#9c6b45"/>
+        <ellipse cx="24" cy="62" rx="8" ry="4.5" fill="#ff8fa3" opacity=".65"/>
+        <ellipse cx="96" cy="62" rx="8" ry="4.5" fill="#ff8fa3" opacity=".65"/>
+        <path d="M30 46 Q37 52 44 46" stroke="#1d120a" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path d="M76 46 Q83 52 90 46" stroke="#1d120a" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <rect x="41" y="57" width="38" height="15" rx="7.5" fill="#3b2416"/>
+        <ellipse cx="51" cy="63" rx="3" ry="2" fill="#1d120a"/>
+        <ellipse cx="69" cy="63" rx="3" ry="2" fill="#1d120a"/>
+        <path d="M60 72 L60 79 M52 82 Q56 85 60 79 Q64 85 68 82" stroke="#3b2416" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <h1>썩은 핀볼</h1>
+    </div>
 
     <div class="sec">
       <label class="lbl" for="names">참가자</label>
@@ -124,8 +148,7 @@ input[type=range]{accent-color:var(--neon);flex:1;min-width:80px}
       <label class="lbl" for="rankMode">당첨 순위</label>
       <div class="row">
         <select id="rankMode">
-          <option value="first">첫 번째 골인</option>
-          <option value="last">마지막 골인</option>
+          <option value="last" selected>마지막 골인</option>
           <option value="n">N번째 골인</option>
         </select>
         <label for="rankN">N</label>
@@ -219,6 +242,15 @@ let riders = [], riderWarn = null, nextRiderAt = 0, engineNode = false;
 let prerender = null, audio = null, lastTick = 0;
 let dpr = 1, scale = 1, cssW = 0, cssH = 0, ringAngle = 0, winRank = 0, decisive = false;
 let bgmWanted = false, lastTickSnd = 0;
+// collisionStart 안에서 바꾼 속도·힘은 같은 스텝의 충돌 해소/힘 초기화에 덮여 사라진다 → 스텝이 끝난 뒤 적용
+let pendingHits = [];
+const SUBSTEPS = 2;
+const BUMPER_MAX = 16;   // 범퍼가 튕겨내는 최고 속도 (px / 16.7ms)
+const BALL_MAX = 26;     // 공 최고 속도 — 얇은 벽(14px) 터널링 방지
+const SHUFFLE_MS = 2600; // 섞는 시간
+const SHUFFLE_FLOW = 11; // 섞는 중 위·아래층 흐름 속도
+const SHUFFLE_MAX = 14;  // 섞는 중 공 최고 속도
+let shuffleStart = 0, nextJetAt = 0, shuffleDir = 1;
 
 const riderImg = new Image();
 riderImg.src = 'assets/rider.png';
@@ -253,32 +285,46 @@ function makeObstacle(body, kind, color) {
   obstacles.push(body);
   return body;
 }
+// Matter.js는 isStatic 물체를 만들 때 friction=1, restitution=0 으로 덮어쓴다(Body.setStatic).
+// → 생성 뒤에 재질을 다시 넣어야 사양의 반발력(범퍼 1.4 등)이 실제로 적용된다.
+// 장애물 마찰은 0: Matter.js의 접촉 마찰은 에너지 손실이 과해서 공이 램프에서 기어간다.
+// (공 회전은 그리지 않으므로 미끄러짐과 굴러감은 겉보기로 차이가 없다.) 대기구역 게이트와 공끼리는 마찰 유지.
+function mat(b, restitution, friction = 0) {
+  b.restitution = restitution; b.friction = friction;
+  return b;
+}
+// Bodies.circle은 반지름이 작으면 10~12각형이 돼서 울퉁불퉁하게 튄다 → 매끈한 다각형으로 직접 생성
+function smoothCircle(x, y, r, opts, sides = 32) {
+  const b = Bodies.polygon(x, y, sides, r, opts);
+  b.circleRadius = r;
+  return b;
+}
 function peg(x, y, r = 6, rest = .5) {
-  return makeObstacle(Bodies.circle(x, y, r, {isStatic:true, restitution:rest, friction:.02}), 'peg', '#00f0ff');
+  return makeObstacle(mat(smoothCircle(x, y, r, {isStatic:true}, 24), rest), 'peg', '#00f0ff');
 }
 function bumper(x, y, r, col, rest = 1.4) {
-  return makeObstacle(Bodies.circle(x, y, r, {isStatic:true, restitution:rest, friction:0}), 'bumper', col);
+  return makeObstacle(mat(smoothCircle(x, y, r, {isStatic:true}), rest), 'bumper', col);
 }
 function spinner(x, y, arms, len, spd, col = '#ff2d95') {
   const parts = [];
   for (let i = 0; i < arms; i++) parts.push(Bodies.rectangle(x, y, len * 2, 14, {angle: Math.PI * i / arms}));
-  const b = Body.create({parts, isStatic:true, label:'spinner', restitution:.6, friction:.02});
+  const b = mat(Body.create({parts, isStatic:true, label:'spinner'}), .6);
   b.plugin = {kind:'spinner', color:col, flash:0, arms, len, spd};
   Composite.add(world, b);
   spinners.push(b);
   return b;
 }
 function ramp(x, y, len, ang) {
-  return makeObstacle(Bodies.rectangle(x, y, len, 14, {isStatic:true, angle:ang, restitution:.3, friction:.01}), 'ramp', '#b388ff');
+  return makeObstacle(mat(Bodies.rectangle(x, y, len, 14, {isStatic:true, angle:ang}), .3), 'ramp', '#b388ff');
 }
 function wall(x, y, w, h, ang = 0, draw = false) {
-  const b = Bodies.rectangle(x, y, w, h, {isStatic:true, angle:ang, restitution:.4, friction:.02, label:'wall'});
+  const b = mat(Bodies.rectangle(x, y, w, h, {isStatic:true, angle:ang, label:'wall'}), .4);
   if (draw) makeObstacle(b, 'wall', '#4af6ff');
   else Composite.add(world, b);
   return b;
 }
 function paddle(y, len, amp, spd, phase) {
-  const b = makeObstacle(Bodies.rectangle(300, y, len, 16, {isStatic:true, restitution:.5, friction:.02}), 'paddle', '#8cff3a');
+  const b = makeObstacle(mat(Bodies.rectangle(300, y, len, 16, {isStatic:true}), .5), 'paddle', '#8cff3a');
   movers.push({body:b, y, amp, spd, phase, x:300});
   return b;
 }
@@ -347,7 +393,7 @@ function buildFinish() {
   wall(80, 1729, 320, 20, .5, true);
   wall(520, 1729, 320, 20, -.5, true);
   for (const x of [165, 435]) {
-    makeObstacle(Bodies.circle(x, 1776, 36, {isStatic:true, restitution:1, label:'pop'}), 'pop', '#ff2d95');
+    makeObstacle(mat(smoothCircle(x, 1776, 36, {isStatic:true, label:'pop'}), 1), 'pop', '#ff2d95');
   }
   wall(220, 1845, 16, 120, 0, true);
   wall(380, 1845, 16, 120, 0, true);
@@ -359,7 +405,8 @@ function buildFinish() {
     parts.push(Bodies.rectangle(RING.x + Math.cos(a) * RING.r, RING.y + Math.sin(a) * RING.r,
       2 * Math.PI * RING.r / N + 3, 12, {angle: a + Math.PI / 2}));
   }
-  ring = Body.create({parts, isStatic:true, label:'ring', restitution:.5, friction:.02});
+  // 링은 마찰을 둬서 회전이 어깨에 얹힌 공을 실제로 실어 나르게 한다
+  ring = mat(Body.create({parts, isStatic:true, label:'ring'}), .5, 1);
   ring.plugin = {kind:'ring', color:'#ffd400', flash:0};
   Composite.add(world, ring);
   ringAngle = 0;
@@ -373,14 +420,15 @@ function build() {
   engine = Engine.create({gravity:{x:0, y:1.15}, positionIterations:8, velocityIterations:6});
   world = engine.world;
   balls = []; obstacles = []; spinners = []; movers = []; finished = [];
-  particles = []; shocks = []; texts = []; confetti = [];
+  particles = []; shocks = []; texts = []; confetti = []; pendingHits = [];
   removeRiders(); riderWarn = null; killDaldal(); stopEngineSound();
   nextRiderAt = performance.now() + 3000;
 
   wall(-20, H / 2, 40, H * 2);
   wall(620, H / 2, 40, H * 2);
   wall(300, -20, W * 2, 40);
-  gate = Bodies.rectangle(300, GATE_Y, 600, 10, {isStatic:true, label:'gate', restitution:.3});
+  // 윗면은 GATE_Y-5 그대로, 아래로 두껍게(40px) → 섞을 때 공 무더기에 눌려도 뚫고 내려가지 않음
+  gate = mat(Bodies.rectangle(300, GATE_Y - 5 + 20, 600, 40, {isStatic:true, label:'gate'}), .3, 1);
   Composite.add(world, gate);
 
   if (map === 'bubble') buildBubble();
@@ -389,7 +437,7 @@ function build() {
   buildFinish();
 
   parseNames().forEach((e, i) => {
-    const b = Bodies.circle(rand(40, 560), rand(26, 96), R, {
+    const b = smoothCircle(rand(40, 560), rand(26, 96), R, {
       restitution:.5, friction:.03, frictionAir:.003, density:.002, label:'ball',
       collisionFilter:{category:2, mask:0xFFFF}
     });
@@ -429,7 +477,6 @@ function setTense(on) {
 function targetRank() {
   const total = balls.length + finished.length;
   const mode = $('rankMode').value;
-  if (mode === 'first') return 1;
   if (mode === 'last') return total;
   return clamp(parseInt($('rankN').value, 10) || 1, 1, Math.max(1, total));
 }
@@ -456,14 +503,23 @@ function onHit(ball, tgt, sp) {
   if (kind !== 'wall' || spd > 4) burst(sp, n, col, spd * .6);
 
   if (kind === 'bumper') {
-    const dx = ball.position.x - tgt.position.x, dy = ball.position.y - tgt.position.y;
-    const l = Math.hypot(dx, dy) || 1;
-    Body.applyForce(ball, ball.position, {x:dx / l * .012, y:dy / l * .012});
+    // 능동 범퍼: 중심→공 방향으로 킥 (applyForce .012를 한 서브스텝 동안 준 것과 같은 속도 변화)
+    pendingHits.push(() => {
+      const dx = ball.position.x - tgt.position.x, dy = ball.position.y - tgt.position.y;
+      const l = Math.hypot(dx, dy) || 1, v = getVel(ball);
+      const kick = .012 / ball.mass * Math.pow(Body._baseDelta / SUBSTEPS, 2) * SUBSTEPS;
+      let nx = v.x + dx / l * kick, ny = v.y + dy / l * kick;
+      // 실제 핀볼 범퍼처럼 튕겨내는 속도에 상한 (반발력 1.4끼리 주고받으며 폭주하는 것 방지)
+      const s = Math.hypot(nx, ny);
+      if (s > BUMPER_MAX) { nx *= BUMPER_MAX / s; ny *= BUMPER_MAX / s; }
+      Body.setVelocity(ball, {x:nx, y:ny});
+    });
     playTick(kind, spd);
   } else if (kind === 'rider') {
     const rd = riders.find(r => r.body === tgt);
     const d = rd ? rd.dir : 1;
-    Body.setVelocity(ball, {x:d * (7 + Math.random() * 8), y:-(7 + Math.random() * 9)});
+    const vx = d * (7 + Math.random() * 8), vy = -(7 + Math.random() * 9);
+    pendingHits.push(() => Body.setVelocity(ball, {x:vx, y:vy}));
     for (let i = 0; i < 30; i++) {
       const a = Math.random() * Math.PI * 2, s = rand(2, 10);
       addParticle({x:sp.x, y:sp.y, vx:Math.cos(a) * s, vy:Math.sin(a) * s, color: i % 2 ? '#fff' : ball.plugin.color, size:rand(2, 5), dur:650});
@@ -473,7 +529,8 @@ function onHit(ball, tgt, sp) {
     beep(140, .2, 'square', .2);
   } else if (kind === 'pop') {
     const dir = ball.position.x < tgt.position.x ? 1 : -1;
-    Body.setVelocity(ball, {x:dir * (3 + Math.random() * 4), y:-(15 + Math.random() * 4)});
+    const vx = dir * (3 + Math.random() * 4), vy = -(15 + Math.random() * 4);
+    pendingHits.push(() => Body.setVelocity(ball, {x:vx, y:vy}));
     for (let i = 0; i < 45; i++) {
       const a = -Math.PI / 2 + (Math.random() - .5) * 2.4, s = rand(4, 14);
       addParticle({x:sp.x, y:sp.y, vx:Math.cos(a) * s, vy:Math.sin(a) * s, g:.2, dur:700,
@@ -575,31 +632,23 @@ function tick(dt, now) {
   if (state !== 'paused' && engine) {
     const ts = timeScale, d = dt * ts;
 
-    for (const s of spinners) Body.setAngle(s, s.angle + s.plugin.spd * ts);
-    if (ring) {
-      const da = RING.spd * ts;
-      Body.rotate(ring, da, {x:RING.x, y:RING.y});
-      ringAngle += da;
-    }
-    for (const m of movers) {
-      m.phase += m.spd * dt * ts;
-      const x = 300 + Math.sin(m.phase) * m.amp;
-      Body.setPosition(m.body, {x, y:m.y});
-      Body.setVelocity(m.body, {x:x - m.x, y:0});
-      m.x = x;
-    }
-
     if (state === 'shuffle') {
-      if (now < shuffleUntil) {
-        for (const b of balls) Body.applyForce(b, b.position, {x:(Math.random() - .5) * .006, y:-Math.random() * .004});
-      } else setState('ready');
+      if (now < shuffleUntil) shuffleStep(dt, now);
+      else setState('ready');
     }
 
     if (state === 'running' && $('rider').checked) updateRider(dt, now);
     else if (riders.length || riderWarn) { removeRiders(); riderWarn = null; stopEngineSound(); }
 
-    Engine.update(engine, d / 2);
-    Engine.update(engine, d / 2);
+    for (let s = 0; s < SUBSTEPS; s++) {
+      stepKinematics(dt, ts / SUBSTEPS);
+      Engine.update(engine, d / SUBSTEPS);
+      if (pendingHits.length) { const h = pendingHits; pendingHits = []; h.forEach(fn => fn()); }
+      for (const b of balls) {
+        const v = getVel(b), sp = Math.hypot(v.x, v.y);
+        if (sp > BALL_MAX) Body.setVelocity(b, {x:v.x * BALL_MAX / sp, y:v.y * BALL_MAX / sp});
+      }
+    }
 
     for (let i = balls.length - 1; i >= 0; i--) {
       const b = balls[i], pl = b.plugin, p = b.position;
@@ -609,14 +658,21 @@ function tick(dt, now) {
         Body.setPosition(b, {x:300, y:200}); Body.setVelocity(b, {x:0, y:0}); pl.trail = [];
         continue;
       }
-      if (getSpd(b) < .35 && p.y > GATE_Y + 40) {
-        pl.still += dt;
-        if (pl.still > 900) {
-          pl.still = 0;
-          Body.applyForce(b, p, {x:(Math.random() - .5) * .02, y:-.012 - Math.random() * .01});
-          burst(p, 5, '#ffffff', 3);
-        }
-      } else pl.still = 0;
+      // 안티잼: 속도가 아니라 '실제로 어디론가 가고 있는지'로 판단한다.
+      // 2초 동안 40px 반경을 못 벗어나면 끼인 것(멈춤이든, 범퍼-벽 사이에서 통통 왕복이든)
+      // → 가운데 쪽 위로 튕겨내고, 같은 자리에서 또 끼면 점점 세게.
+      const inRing = Math.hypot(p.x - RING.x, p.y - RING.y) < RING.r;   // 링 안에서 틈을 기다리는 건 정상
+      if (!pl.anchor || inRing || p.y <= GATE_Y + 40 ||
+          Math.hypot(p.x - pl.anchor.x, p.y - pl.anchor.y) > 40) {
+        if (pl.anchor && Math.hypot(p.x - pl.anchor.x, p.y - pl.anchor.y) > 120) pl.jam = 0;
+        pl.anchor = {x:p.x, y:p.y, t:now};
+      } else if (now - pl.anchor.t > 2000) {
+        pl.anchor.t = now;
+        pl.jam = Math.min(4, (pl.jam || 0) + 1);
+        const k = pl.jam, toCenter = Math.sign(300 - p.x) || 1;
+        Body.applyForce(b, p, {x:(toCenter * .004 + (Math.random() - .5) * .006) * k, y:(-.008 - Math.random() * .004) * k});
+        burst(p, 5, '#ffffff', 3);
+      }
       if (p.y > FINISH_Y) {
         Composite.remove(world, b);
         balls.splice(i, 1);
@@ -626,6 +682,16 @@ function tick(dt, now) {
         if (!winnerDone && finished.length === targetRank()) announce(pl, finished.length);
         else renderResults();
       }
+    }
+    // 남은 공이 1개이고 그 공이 당첨 순위(마지막 골인 등)라면 결과가 이미 정해졌다 → 기다리지 않고 바로 발표
+    if (state === 'running' && !winnerDone && balls.length === 1 && targetRank() === finished.length + 1) {
+      const b = balls[0], pl = b.plugin;
+      Composite.remove(world, b);
+      balls.length = 0;
+      finished.push(pl);
+      goalFirework(b.position.x, b.position.y, pl);
+      updateCount();
+      announce(pl, finished.length);
     }
     if (state === 'running' && balls.length === 0) {
       setState('done');
@@ -668,6 +734,77 @@ function tick(dt, now) {
   updateCamera();
 }
 
+// 섞기: 팝콘처럼 공마다 제각각 다른 순간에 사방으로 튀어 오르고(서로 독립적으로 흩어져 순서가 뒤섞임),
+// 약한 회오리와 바닥 공기 분사가 더해져 공끼리 부딪히며 뒤죽박죽 섞인다.
+// 위치를 옮기지 않고 속도만 더하므로 나머지는 물리 엔진이 처리한다.
+function shuffleStep(dt, now) {
+  const left = shuffleUntil - now;
+  const fade = Math.min(1, left / 400);              // 마지막 0.4초는 서서히 잦아들며 내려앉음
+  const dir = shuffleDir;                             // 섞기마다 무작위 방향으로 대기구역을 한 바퀴씩 순환
+  const k = .12 * fade * dt / 16.67;
+  if (left > 350) {
+    for (const b of balls) {
+      const pl = b.plugin;
+      if (!pl.popAt || now >= pl.popAt) {
+        pl.popAt = now + rand(120, 650);
+        if (b.position.y > 45) {                        // 바닥 근처에 있을 때만 튀어 오름
+          // 높이·간격을 공마다 크게 다르게: 위층(한쪽 흐름)에 머무는 시간이 달라져 이동 거리가 갈린다
+          Body.setVelocity(b, {x:rand(-9, 9), y:-(Math.random() < .35 ? rand(3, 6) : rand(9, 14))});
+        }
+      }
+    }
+  }
+  // 회오리(컨베이어형): 위층은 한쪽, 아래층은 반대쪽으로 흐른다. 팝콘으로 튀어 오른 공과 바닥에 있는 공이
+  // 서로 다른 방향으로 실려 가므로, 공마다 튀는 타이밍에 따라 이동 거리가 달라져 순서가 확실히 섞인다.
+  for (const b of balls) {
+    const v = getVel(b);
+    const layer = clamp((58 - b.position.y) / 50, -1, 1);   // 위 +1 … 아래 -1
+    const target = SHUFFLE_FLOW * layer * dir;
+    let vx = v.x + (target - v.x) * k, vy = v.y;
+    const s = Math.hypot(vx, vy);
+    if (s > SHUFFLE_MAX) { vx *= SHUFFLE_MAX / s; vy *= SHUFFLE_MAX / s; }
+    Body.setVelocity(b, {x:vx, y:vy});
+  }
+  if (now >= nextJetAt && left > 300) {
+    nextJetAt = now + rand(90, 150);
+    const x0 = rand(40, 560);
+    const lean = (300 - x0) / 300 * 5;                // 가장자리 분사는 반대편(가운데 너머)으로 비스듬히 뿜음
+    for (const b of balls) {
+      const dx = b.position.x - x0;
+      if (Math.abs(dx) < 70 && b.position.y > 30) {
+        const v = getVel(b);
+        Body.setVelocity(b, {x:v.x + lean + dx / 70 * 3 + rand(-3, 3), y:v.y - rand(7, 11) * (1 - Math.abs(dx) / 140)});
+      }
+    }
+    for (let i = 0; i < 12; i++) {
+      addParticle({x:x0 + rand(-20, 20), y:GATE_Y - 6, vx:rand(-1.5, 1.5), vy:-rand(3, 9), g:.15, dur:450,
+        color: i % 2 ? '#ffffff' : '#00f0ff', size:rand(1.5, 3.5)});
+    }
+    shocks.push({x:x0, y:GATE_Y - 4, r:2, v:4, life:.7, color:'#00f0ff', w:3});
+    beep(rand(260, 420), .05, 'square', .035);
+  }
+}
+
+// 회전·이동 장애물을 서브스텝마다 updateVelocity=true 로 움직인다.
+// 그래야 충돌 계산이 이들의 실제 표면 속도를 알고 공을 쳐내거나 실어 나른다(순간이동 밀어내기 방지).
+function stepKinematics(dt, f) {
+  for (const s of spinners) Body.setAngle(s, s.angle + s.plugin.spd * f, true);
+  if (ring) {
+    const da = RING.spd * f;
+    Body.rotate(ring, da, {x:RING.x, y:RING.y}, true);
+    ringAngle += da;
+  }
+  for (const m of movers) {
+    m.phase += m.spd * dt * f;
+    m.x = 300 + Math.sin(m.phase) * m.amp;
+    Body.setPosition(m.body, {x:m.x, y:m.y}, true);
+  }
+  for (const r of riders) {
+    r.x += r.vx * f;
+    Body.setPosition(r.body, {x:r.x, y:r.y + 20}, true);
+  }
+}
+
 function updateCamera() {
   let tz = 1, tx = 0, ty = 0;
   if (state === 'running' || state === 'paused') {
@@ -706,9 +843,10 @@ function updateRider(dt, now) {
   if (riderWarn && now >= riderWarn.until) {
     for (const ln of riderWarn.lanes) {
       const x = ln.dir > 0 ? -170 : 770;
-      const body = Bodies.rectangle(x, ln.y + 20, 120, 120, {
-        density:8, frictionAir:0, inertia:Infinity, label:'rider', collisionFilter:{category:4, mask:2}
-      });
+      // 키네마틱(질량 무한) 물체로 서브스텝마다 이동 → 공에 실제 속도로 부딪힌다
+      const body = mat(Bodies.rectangle(x, ln.y + 20, 120, 120, {
+        isStatic:true, label:'rider', collisionFilter:{category:4, mask:2}
+      }), .5);
       body.plugin = {kind:'rider', color:'#ffd400', flash:0};
       Composite.add(world, body);
       riders.push({body, dir:ln.dir, x, y:ln.y, vx: ln.dir * (3.1 + Math.random() * .6), t:0});
@@ -719,9 +857,7 @@ function updateRider(dt, now) {
   if (riders.length) {
     for (let i = riders.length - 1; i >= 0; i--) {
       const r = riders[i];
-      r.x += r.vx * timeScale; r.t += dt;
-      Body.setPosition(r.body, {x:r.x, y:r.y + 20});
-      Body.setVelocity(r.body, {x:r.vx * timeScale, y:0});
+      r.t += dt;
       if (Math.random() < .8) {
         addParticle({x:r.x - r.dir * 55, y:r.y + 60, vx:-r.dir * rand(.8, 2.4), vy:-rand(.4, 1.4), g:-.025, dur:1000,
           color: Math.random() < .5 ? '#8a8fa8' : '#c9ccdb', size:rand(5, 12), smoke:true});
@@ -1136,7 +1272,15 @@ function doShuffle() {
   if (bgm.paused) bgmPlay();
   if (state === 'running' || state === 'paused' || state === 'done') build();
   setState('shuffle');
-  shuffleUntil = performance.now() + 1400;
+  const now = performance.now();
+  shuffleStart = now;
+  shuffleUntil = now + SHUFFLE_MS;
+  for (const b of balls) b.plugin.popAt = now + rand(0, 250);
+  shuffleDir = Math.random() < .5 ? -1 : 1;
+  nextJetAt = now;
+  shake();
+  beep(180, .12, 'sawtooth', .06);
+  setTimeout(() => beep(260, .12, 'sawtooth', .06), 70);
 }
 $('shuffle').addEventListener('click', doShuffle);
 $('start').addEventListener('click', () => {
