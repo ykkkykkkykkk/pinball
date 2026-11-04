@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>썩은 핀볼</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Jua&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
   --neon:#00f0ff;--pink:#ff2d95;--gold:#ffd400;--lime:#8cff3a;--muted:#9aa0d8;--line:#2a2f6e;
@@ -82,6 +82,7 @@ input[type=range]{accent-color:var(--neon);flex:1;min-width:80px}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
 .winner{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(4,5,26,.72);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
 .winner.show{display:flex}
+.winner[hidden]{display:none}
 .wcard{text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px;padding:20px}
 .winner.show .wcard{animation:pop .6s cubic-bezier(.2,1.6,.4,1)}
 @keyframes pop{from{transform:scale(.3);opacity:0}to{transform:scale(1);opacity:1}}
@@ -164,7 +165,7 @@ input[type=range]{accent-color:var(--neon);flex:1;min-width:80px}
 
     <div class="sec">
       <div class="lbl">난입</div>
-      <div class="row"><label class="chip"><input type="checkbox" id="rider" checked>달달달달 라이더</label></div>
+      <div class="row"><label class="chip"><input type="checkbox" id="rider" checked>달달달달 라이더</label><label class="chip"><input type="checkbox" id="sabakOn" checked> 썩박궤</label></div>
     </div>
 
     <div class="sec">
@@ -242,6 +243,62 @@ let riders = [], riderWarn = null, nextRiderAt = 0, engineNode = false;
 let prerender = null, audio = null, lastTick = 0;
 let dpr = 1, scale = 1, cssW = 0, cssH = 0, ringAngle = 0, winRank = 0, decisive = false;
 let bgmWanted = false, lastTickSnd = 0;
+// 썩박궤 난입 — quake 는 화면 지진(x, y, rot, zoom). shake() 함수(캐비닛 흔들기)와 이름이 겹치지 않게 분리
+let sabak = null, nextSabakAt = 0, quake = {x:0, y:0}, rumble = null, worldM = null;
+const sabakImg = new Image(); sabakImg.src = 'assets/sabak_cut.png';
+const SABAK = {inMs:500, holdMs:1700, outMs:600};   // 등장 / 지진 / 퇴장
+// 주먹 펀치: 등장 끝에 살짝 뒤로 빼고(WIND) → 화면 쪽으로 질러서(THRUST) → 렌즈에 '쾅'(IMPACT) → 반동
+const PUNCH = {wind:180, thrust:160, recoil:220, fx:.32, fy:.71};   // fx, fy = 이미지 안 주먹 위치(비율)
+const IMPACT = SABAK.inMs + PUNCH.thrust;
+function punchK(T) {
+  const a = SABAK.inMs;
+  if (T < a - PUNCH.wind) return 0;
+  if (T < a) return -.08 * Math.sin(Math.PI * (T - (a - PUNCH.wind)) / PUNCH.wind);
+  if (T < IMPACT) { const u = (T - a) / PUNCH.thrust; return u * u; }
+  return Math.exp(-(T - IMPACT) / PUNCH.recoil);
+}
+// 주먹의 화면 좌표와 이미지 배율 (흔들림 제외)
+function sabakPose(T, ease) {
+  const iw = sabakImg.naturalWidth || 1024, ih = sabakImg.naturalHeight || 664;
+  const pk = punchK(T), sc0 = (W / iw) * (1 + .3 * ease);
+  const cx = W * .5, cy = VH * .45 + (1 - ease) * VH * .7;
+  let fx = cx + (PUNCH.fx - .5) * iw * sc0, fy = cy + (PUNCH.fy - .5) * ih * sc0;
+  const pull = .35 * Math.max(0, pk);
+  fx += (W * .5 - fx) * pull; fy += (VH * .45 - fy) * pull;
+  return {iw, ih, pk, fx, fy, sc: sc0 * (1 + .95 * pk)};
+}
+function makeCracks(x, y) {
+  const rays = [], n = 13;
+  for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2 + rand(-.18, .18), len = rand(150, 430), seg = 6 + (i % 3);
+    const pts = [{x, y}];
+    for (let k = 1; k <= seg; k++) {
+      const d = len * k / seg, j = rand(-11, 11);
+      pts.push({x:x + Math.cos(a) * d - Math.sin(a) * j, y:y + Math.sin(a) * d + Math.cos(a) * j});
+    }
+    rays.push(pts);
+    if (Math.random() < .45) {
+      const m = pts[2 + (i % 2)], b = a + (Math.random() < .5 ? -1 : 1) * rand(.4, .8), bl = rand(50, 120);
+      rays.push([m, {x:m.x + Math.cos(b) * bl * .5 + rand(-6, 6), y:m.y + Math.sin(b) * bl * .5 + rand(-6, 6)},
+        {x:m.x + Math.cos(b) * bl, y:m.y + Math.sin(b) * bl}]);
+    }
+  }
+  const main = rays.filter(r => r.length > 3), rings = [];
+  for (const k of [1, 2]) rings.push(main.map(r => r[k]));
+  return {x, y, rays, rings};
+}
+function playCrack() {
+  if (!audio || !$('sound').checked) return;
+  const t = audio.currentTime, len = Math.floor(audio.sampleRate * .3);
+  const buf = audio.createBuffer(1, len, audio.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+  const src = audio.createBufferSource(), f = audio.createBiquadFilter(), g = audio.createGain();
+  src.buffer = buf; f.type = 'highpass'; f.frequency.setValueAtTime(1400, t);
+  g.gain.setValueAtTime(.45, t);
+  src.connect(f); f.connect(g); g.connect(audio.destination);
+  src.start(t);
+}
+const SAND = ['#e8c88a', '#d8b47a', '#a87c45', '#6b4a26'];
 // collisionStart 안에서 바꾼 속도·힘은 같은 스텝의 충돌 해소/힘 초기화에 덮여 사라진다 → 스텝이 끝난 뒤 적용
 let pendingHits = [];
 const SUBSTEPS = 2;
@@ -423,6 +480,7 @@ function build() {
   particles = []; shocks = []; texts = []; confetti = []; pendingHits = [];
   removeRiders(); riderWarn = null; killDaldal(); stopEngineSound();
   nextRiderAt = performance.now() + 3000;
+  sabak = null; nextSabakAt = performance.now() + 9000; quake = {x:0, y:0}; stopRumble();
 
   wall(-20, H / 2, 40, H * 2);
   wall(620, H / 2, 40, H * 2);
@@ -546,9 +604,10 @@ function onHit(ball, tgt, sp) {
 }
 
 /* ---------- 파티클 ---------- */
+function pMax() { return sabak ? 1400 : 600; }
 function addParticle(p) {
   particles.push(Object.assign({g:.18, life:1, dur:600, size:3, child:false}, p));
-  if (particles.length > 600) particles.splice(0, particles.length - 600);
+  if (particles.length > pMax()) particles.splice(0, particles.length - pMax());
 }
 function burst(sp, n, color, v) {
   for (let i = 0; i < n; i++) {
@@ -629,6 +688,8 @@ function tick(dt, now) {
     setTimeout(() => beep(55, .2, 'sine', .18), 180);
   }
 
+  if (state !== 'running' && sabak) endSabak();   // 멈춤 포함 — 진행 중이던 썩박궤는 즉시 종료
+
   if (state !== 'paused' && engine) {
     const ts = timeScale, d = dt * ts;
 
@@ -639,6 +700,7 @@ function tick(dt, now) {
 
     if (state === 'running' && $('rider').checked) updateRider(dt, now);
     else if (riders.length || riderWarn) { removeRiders(); riderWarn = null; stopEngineSound(); }
+    updateSabak(dt, decisive);
 
     for (let s = 0; s < SUBSTEPS; s++) {
       stepKinematics(dt, ts / SUBSTEPS);
@@ -721,7 +783,7 @@ function tick(dt, now) {
       }
       if (q.life <= 0) particles.splice(i, 1);
     }
-    if (particles.length > 600) particles.splice(0, particles.length - 600);
+    if (particles.length > pMax()) particles.splice(0, particles.length - pMax());
     for (let i = shocks.length - 1; i >= 0; i--) {
       const s = shocks[i]; s.r += s.v * ts; s.life -= d / 450;
       if (s.life <= 0) shocks.splice(i, 1);
@@ -829,8 +891,213 @@ function updateCamera() {
 }
 
 /* ---------- 라이더 ---------- */
+function endSabak() {
+  sabak = null; quake = {x:0, y:0}; stopRumble();
+}
+function updateSabak(dt, dec) {
+  if (state !== 'running' || !$('sabakOn').checked) { if (sabak) endSabak(); return; }
+  const now = performance.now();
+  if (rumble && !$('sound').checked) stopRumble();
+  if (!sabak) {
+    if (!riders.length && !riderWarn && !dec && now > nextSabakAt && balls.length >= 2) {
+      sabak = {t:0, kick:0, gust:0, slam:false};
+      startRumble();
+      beep(70, .6, 'sawtooth', .25);
+      shake();
+    }
+    return;
+  }
+  const S = SABAK, total = S.inMs + S.holdMs + S.outMs;
+  sabak.t += dt;
+  const T = sabak.t;
+  if (T > total) { endSabak(); nextSabakAt = now + 14000 + Math.random() * 8000; return; }
+  const hold = T > S.inMs && T < S.inMs + S.holdMs;
+  const vh = VH / cam.zoom, vw = W / cam.zoom;
+
+  if (T >= IMPACT && !sabak.slam) {
+    sabak.slam = true;
+    const ps = sabakPose(IMPACT, 1);
+    sabak.crack = makeCracks(ps.fx, ps.fy);
+    flashOn();
+    beep(45, .5, 'square', .4);
+    playCrack();
+    shake();
+    // 주먹에 맞은 공: 맞은 자리(화면 좌표 → 월드 좌표)에서 가까울수록 세게, 바깥쪽 위로 붕 날아감
+    const hx = cam.x + ps.fx / cam.zoom, hy = cam.y + ps.fy / cam.zoom, hr = 320 / cam.zoom;
+    for (const b of balls) {
+      const dx = b.position.x - hx, dy = b.position.y - hy, d = Math.hypot(dx, dy) || 1;
+      const v = getVel(b);
+      if (d < hr) {
+        const k = 1 - .45 * d / hr;
+        Body.setVelocity(b, {x:v.x * .3 + (dx / d) * rand(6, 11) * k, y:-rand(18, 24) * k});
+        b.plugin.punchT = now;
+        burst(b.position, 8, '#ffe0a8', 6);
+        shocks.push({x:b.position.x, y:b.position.y, r:4, v:7, life:.8, color:'#ffffff', w:4});
+      } else if (b.position.y > cam.y && b.position.y < cam.y + vh) {
+        Body.setVelocity(b, {x:v.x, y:Math.min(v.y, 0) - rand(4, 8)});   // 화면 안 나머지 공도 충격에 살짝 들썩
+      }
+    }
+    for (const b of balls) Body.applyForce(b, b.position, {x:(Math.random() - .5) * .03, y:-(.012 + Math.random() * .018)});
+    shocks.push({x:W / 2, y:cam.y + VH * .55, r:10, v:22, life:1, color:'#ffb347', w:10});
+  }
+
+  let amp;
+  if (T <= S.inMs) amp = T / S.inMs * 6;
+  else if (hold) amp = 34 * Math.exp(-(T - S.inMs) / 900) + 12;
+  else amp = Math.max(0, (total - T) / S.outMs * 10);
+  quake = {
+    x:(Math.random() - .5) * 2 * amp,
+    y:(Math.random() - .5) * 2 * amp,
+    rot:(hold ? .035 : .012) * (Math.random() - .5) * 2 * (amp / 30),
+    zoom: hold ? .03 + .02 * Math.sin(T / 45) : 0
+  };
+  // 펀치: 지르는 동안 카메라가 살짝 빨려 들어가고, 맞는 순간 크게 튕김
+  if (T >= S.inMs && T < IMPACT) quake.zoom += .05 * (T - S.inMs) / PUNCH.thrust;
+  if (T >= IMPACT) {
+    const hit = Math.exp(-(T - IMPACT) / 110);
+    quake.x += (Math.random() - .5) * 90 * hit;
+    quake.y += (Math.random() - .5) * 90 * hit;
+    quake.rot += (Math.random() - .5) * .09 * hit;
+    quake.zoom += .12 * Math.exp(-(T - IMPACT) / 140);
+  }
+
+  if (hold) {
+    sabak.kick += dt;
+    if (sabak.kick >= 60) {
+      sabak.kick -= 60;
+      for (const b of balls) Body.applyForce(b, b.position, {x:(Math.random() - .5) * .016, y:-(Math.random() * .014)});
+      for (let i = 0; i < 28; i++) {
+        particles.push({x:cam.x + Math.random() * vw, y:cam.y - 10 - Math.random() * 40,
+          vx:(Math.random() - .5) * 2.5, vy:rand(5, 14), g:.3, life:1, dur:rand(800, 1300),
+          color:SAND[i % 4], size:rand(2, 6.5), child:false});
+      }
+      for (const b of balls) burst({x:b.position.x, y:b.position.y + R}, 4, Math.random() < .5 ? '#d8b47a' : '#e8c88a', 4);
+    }
+    sabak.gust += dt;
+    if (sabak.gust >= 300) {
+      sabak.gust -= 300;
+      const dir = Math.random() < .5 ? -1 : 1, gy = cam.y + Math.random() * vh;
+      for (let i = 0; i < 40; i++) {
+        particles.push({x: dir > 0 ? cam.x - rand(0, 60) : cam.x + vw + rand(0, 60), y:gy + rand(-120, 120),
+          vx:dir * rand(10, 24), vy:(Math.random() - .5) * 2, g:.02, life:1, dur:500,
+          color: i % 2 ? '#e8c88a' : '#ffd9a0', size:rand(1.5, 4.5), child:false});
+      }
+      for (const b of balls) if (Math.abs(b.position.y - gy) < 120) Body.applyForce(b, b.position, {x:dir * .02, y:0});
+    }
+    if (particles.length > 1400) particles.splice(0, particles.length - 1400);
+  }
+}
+function drawSabak(c) {
+  if (!sabak) return;
+  const S = SABAK, total = S.inMs + S.holdMs + S.outMs, T = sabak.t;
+  const p = T < S.inMs ? T / S.inMs : T < S.inMs + S.holdMs ? 1 : Math.max(0, (total - T) / S.outMs);
+  const ease = 1 - Math.pow(1 - p, 3);
+  c.save();
+  c.fillStyle = `rgba(120,70,20,${.18 * ease})`;
+  c.fillRect(0, 0, W, VH);
+  if (sabakImg.complete && sabakImg.naturalWidth) {
+    // 주먹 위치를 기준점으로 확대 → 주먹이 화면(렌즈) 쪽으로 튀어나오는 느낌
+    const ps = sabakPose(T, ease), sc = ps.sc;
+    const fx = ps.fx + quake.x * .5, fy = ps.fy + quake.y * .5;
+    c.globalAlpha = Math.min(1, ease * 1.3);
+    c.shadowBlur = 40; c.shadowColor = 'rgba(255,140,40,.7)';
+    c.drawImage(sabakImg, fx - PUNCH.fx * ps.iw * sc, fy - PUNCH.fy * ps.ih * sc, ps.iw * sc, ps.ih * sc);
+    c.shadowBlur = 0;
+    // 주먹에 맞은 공은 캐릭터 그림 위에 한 번 더 그려서 날아가는 게 보이게 (월드 변환 그대로)
+    const nowMs = performance.now(), hitBalls = balls.filter(b => b.plugin.punchT && nowMs - b.plugin.punchT < 1600);
+    if (hitBalls.length && worldM) {
+      c.save(); c.setTransform(worldM); c.lineCap = 'round';
+      for (const b of hitBalls) {
+        const pl = b.plugin, q = b.position, fa = clamp((1600 - (nowMs - pl.punchT)) / 400, 0, 1), tr = pl.trail;
+        for (let i = 1; i < tr.length; i++) {
+          const a = i / tr.length;
+          c.globalAlpha = a * .7 * fa; c.strokeStyle = '#fff'; c.lineWidth = 26 * a;
+          c.beginPath(); c.moveTo(tr[i - 1].x, tr[i - 1].y); c.lineTo(tr[i].x, tr[i].y); c.stroke();
+          c.globalAlpha = a * .8 * fa; c.strokeStyle = pl.color; c.lineWidth = 14 * a;
+          c.stroke();
+        }
+        c.globalAlpha = fa;
+        c.shadowColor = pl.color; c.shadowBlur = 22;
+        c.fillStyle = pl.color; c.beginPath(); c.arc(q.x, q.y, R, 0, Math.PI * 2); c.fill();
+        c.shadowBlur = 0;
+        const g = c.createRadialGradient(q.x - 3, q.y - 4, 1, q.x, q.y, R);
+        g.addColorStop(0, '#fff'); g.addColorStop(.35, pl.color); g.addColorStop(1, 'rgba(0,0,0,.55)');
+        c.fillStyle = g; c.beginPath(); c.arc(q.x, q.y, R, 0, Math.PI * 2); c.fill();
+        c.font = '700 12px "Noto Sans KR"'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
+        c.lineWidth = 3; c.strokeStyle = '#000'; c.strokeText(pl.name, q.x, q.y - R - 9);
+        c.fillStyle = '#fff'; c.fillText(pl.name, q.x, q.y - R - 9);
+      }
+      c.restore();
+    }
+    // 지르는 동안 주먹 주변 속도선
+    if (T >= S.inMs && T < IMPACT + 120) {
+      const u = T < IMPACT ? (T - S.inMs) / PUNCH.thrust : 1 - (T - IMPACT) / 120;
+      c.globalAlpha = .8 * u; c.strokeStyle = '#fff'; c.lineWidth = 3;
+      c.beginPath();
+      for (let i = 0; i < 18; i++) {
+        const a = i / 18 * Math.PI * 2 + i * .7, r0 = 120 + (i * 53) % 90, r1 = r0 + 60 + (i * 31) % 110;
+        c.moveTo(fx + Math.cos(a) * r0, fy + Math.sin(a) * r0);
+        c.lineTo(fx + Math.cos(a) * r1, fy + Math.sin(a) * r1);
+      }
+      c.stroke();
+    }
+  }
+  if (p > .3) {
+    c.globalAlpha = .55 * ease;
+    c.strokeStyle = '#ffe0a8'; c.lineWidth = 1.5;
+    const ph = T / 40;
+    c.beginPath();
+    for (let i = 0; i < 26; i++) {
+      const y = ((i * 73 + ph * 60) % (VH + 40)) - 20;
+      const x = ((i * 131 + ph * 220) % (W + 200)) - 100;
+      const len = 40 + ((i * 37) % 90);
+      c.moveTo(x, y); c.lineTo(x + len, y + len * .12);
+    }
+    c.stroke();
+  }
+  c.globalAlpha = 1;
+  const vg = c.createRadialGradient(W / 2, VH * .5, VH * .25, W / 2, VH * .5, VH * .78);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, `rgba(0,0,0,${.3 * ease})`);
+  c.fillStyle = vg; c.fillRect(0, 0, W, VH);
+  // 렌즈 금 — 화면 유리에 생긴 것이라 흔들리지 않음
+  if (sabak.crack) {
+    const cr = sabak.crack, ca = T < S.inMs + S.holdMs ? 1 : p;
+    const hit = Math.exp(-(T - IMPACT) / 150);
+    if (hit > .02) {
+      const fg = c.createRadialGradient(cr.x, cr.y, 0, cr.x, cr.y, 160);
+      fg.addColorStop(0, `rgba(255,255,255,${.95 * hit})`);
+      fg.addColorStop(1, 'rgba(255,255,255,0)');
+      c.globalAlpha = 1; c.fillStyle = fg; c.fillRect(cr.x - 160, cr.y - 160, 320, 320);
+    }
+    const line = () => {
+      c.beginPath();
+      for (const r of cr.rays) { c.moveTo(r[0].x, r[0].y); for (let i = 1; i < r.length; i++) c.lineTo(r[i].x, r[i].y); }
+      for (const g of cr.rings) { c.moveTo(g[0].x, g[0].y); for (let i = 1; i <= g.length; i++) c.lineTo(g[i % g.length].x, g[i % g.length].y); }
+      c.stroke();
+    };
+    c.lineJoin = 'miter'; c.lineCap = 'round';
+    c.globalAlpha = .5 * ca; c.strokeStyle = '#000'; c.lineWidth = 4; line();
+    c.globalAlpha = .9 * ca; c.strokeStyle = '#fff'; c.lineWidth = 1.6;
+    c.shadowBlur = 8; c.shadowColor = '#bfe9ff'; line();
+    c.shadowBlur = 0; c.globalAlpha = 1;
+  }
+  if (p > .35) {
+    const pop = clamp((T - S.inMs * .35) / 220, 0, 1);
+    const k = (.4 + .6 * (1 - Math.pow(1 - pop, 3))) * (1 + .09 * Math.sin(T / 38));
+    const txt = '썩박궤' + (Math.floor(T / 120) % 2 ? '!!' : '!');
+    c.translate(W / 2, VH - 84); c.scale(k, k);
+    c.font = '400 88px "Jua","Black Han Sans",sans-serif';
+    c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
+    c.lineWidth = 18; c.strokeStyle = '#3a0a24'; c.strokeText(txt, 0, 0);
+    c.lineWidth = 7; c.strokeStyle = '#fff'; c.strokeText(txt, 0, 0);
+    c.shadowBlur = 30; c.shadowColor = '#ff8fcf';
+    c.fillStyle = '#ffb3d9'; c.fillText(txt, 0, 0);
+  }
+  c.restore();
+}
 function updateRider(dt, now) {
-  if (!riders.length && !riderWarn && !decisive && now > nextRiderAt && balls.length >= 2) {
+  if (!sabak && !riders.length && !riderWarn && !decisive && now > nextRiderAt && balls.length >= 2) {
     const ranked = LANES.map(y => ({y, n: balls.filter(b => Math.abs(b.position.y - y) < 150).length}))
       .sort((a, b) => b.n - a.n);
     const l1 = ranked[0].y, l2 = ranked[1].y;
@@ -1023,8 +1290,14 @@ function drawRider(c, r, now) {
 function draw(now) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = '#04051a'; ctx.fillRect(0, 0, cssW, cssH);
-  const k = dpr * scale * cam.zoom;
-  ctx.setTransform(k, 0, 0, k, -cam.x * k, -cam.y * k);
+  const s0 = dpr * scale, z = cam.zoom, cw = cv.width, ch = cv.height;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (quake.rot || quake.zoom) {
+    ctx.translate(cw / 2, ch / 2); ctx.rotate(quake.rot || 0);
+    const zz = 1 + (quake.zoom || 0); ctx.scale(zz, zz); ctx.translate(-cw / 2, -ch / 2);
+  }
+  ctx.transform(s0 * z, 0, 0, s0 * z, (-cam.x * z + quake.x) * s0, (-cam.y * z + quake.y) * s0);
+  worldM = ctx.getTransform();
   if (prerender) ctx.drawImage(prerender, 0, 0, W, H);
 
   for (const o of obstacles) {
@@ -1128,6 +1401,7 @@ function draw(now) {
   // 스크린 좌표
   const ks = dpr * scale;
   ctx.setTransform(ks, 0, 0, ks, 0, 0);
+  drawSabak(ctx);
   const step = Math.floor(now / 120);
   ctx.fillStyle = '#ffd400';
   for (let i = 0; 14 + i * 25 <= VH - 14; i++) {
@@ -1242,6 +1516,30 @@ function startEngineSound() {
   } catch (e) {}
 }
 function stopEngineSound() { engineNode = false; }
+function startRumble() {
+  if (!audio || !$('sound').checked || rumble) return;
+  const t = audio.currentTime;
+  const o = audio.createOscillator(), lfo = audio.createOscillator(), lg = audio.createGain();
+  const f = audio.createBiquadFilter(), g = audio.createGain();
+  o.type = 'sawtooth'; o.frequency.setValueAtTime(38, t);
+  lfo.type = 'sine'; lfo.frequency.setValueAtTime(7, t); lg.gain.setValueAtTime(14, t);
+  lfo.connect(lg); lg.connect(o.frequency);
+  f.type = 'lowpass'; f.frequency.setValueAtTime(180, t);
+  g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.35, t + .3);
+  o.connect(f); f.connect(g); g.connect(audio.destination);
+  o.start(t); lfo.start(t);
+  rumble = {o, lfo, g};
+}
+function stopRumble() {
+  if (!rumble || !audio) { rumble = null; return; }
+  const r = rumble, t = audio.currentTime;
+  rumble = null;
+  try {
+    r.g.gain.cancelScheduledValues(t);
+    r.g.gain.setTargetAtTime(.0001, t, .12);
+    r.o.stop(t + .6); r.lfo.stop(t + .6);
+  } catch (e) {}
+}
 function killDaldal() {
   try { daldal.pause(); daldal.currentTime = 0; } catch (e) {}
   engineNode = false;
@@ -1298,6 +1596,7 @@ $('start').addEventListener('click', () => {
   if (gate) { Composite.remove(world, gate); gate = null; }
   shuffleUntil = 0;
   nextRiderAt = performance.now() + 3000;
+  nextSabakAt = performance.now() + 9000;
   setState('running');
 });
 $('reset').addEventListener('click', () => build());
@@ -1337,6 +1636,7 @@ applyBgmVol();
 resize();
 build();
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => buildPrerender());
+try { document.fonts.load('400 40px "Jua"').catch(() => {}); } catch (e) {}
 requestAnimationFrame(loop);
 })();
 </script>
