@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://picklab.shop/sitemap.xml
