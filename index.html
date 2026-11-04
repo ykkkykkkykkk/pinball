@@ -885,7 +885,7 @@ function stepKinematics(dt, f) {
     Body.setPosition(m.body, {x:m.x, y:m.y}, true);
   }
   for (const r of riders) {
-    r.x += r.vx * f;
+    r.x += r.vx * dt * f;   // vx = px/ms — 화면 주사율과 상관없이 같은 속도
     Body.setPosition(r.body, {x:r.x, y:r.y + 20}, true);
   }
 }
@@ -1139,7 +1139,8 @@ function updateRider(dt, now) {
       }), .5);
       body.plugin = {kind:'rider', color:'#ffd400', flash:0};
       Composite.add(world, body);
-      riders.push({body, dir:ln.dir, x, y:ln.y, vx: ln.dir * (3.1 + Math.random() * .6), t:0});
+      // 화면 밖(-170 / 770)에서 반대편 밖까지 940px 을 달달달달 소리 길이 동안 지나가게 → 소리 시작에 등장, 끝에 퇴장
+      riders.push({body, dir:ln.dir, x, y:ln.y, vx: ln.dir * 940 / riderMs(), t:0});
     }
     riderWarn = null;
     startEngineSound();
@@ -1526,6 +1527,10 @@ function bgmPause() {
   bgmWanted = false;
   bgm.pause();
   $('bgmToggle').textContent = '재생';
+}
+function riderMs() {
+  const d = daldal.duration;
+  return isFinite(d) && d > 1 ? d * 1000 : 3150;
 }
 function startEngineSound() {
   engineNode = true;
